@@ -50,6 +50,7 @@ func NewOperatorConfig(clientConfig *rest.Config) *OperatorConfig {
 	}
 }
 
+// 生成 Controller Manager, 这个 controller 中有所有的子controller
 func (c *OperatorConfig) New() (*Controller, error) {
 	if err := discovery.IsDefaultSupportedVersion(c.KubeClient); err != nil {
 		return nil, err
@@ -75,6 +76,7 @@ func (c *OperatorConfig) New() (*Controller, error) {
 	ctrl.SnapInformer, ctrl.JobInformer = snapc.NewController(ctrl.Controller, nil, ctrl.Config, nil, recorder).InitInformer()
 	ctrl.RSInformer = restoresession.NewController(ctrl.Controller, nil, ctrl.Config, nil, recorder).InitInformer()
 
+	// crtl.Config 拷贝到所有的子的controller 里面
 	ctrl.pgCtrl = pgc.New(c.ClientConfig, c.KubeClient, c.APIExtKubeClient, c.DBClient, c.StashClient, c.DynamicClient, c.AppCatalogClient, c.PromClient, c.CronController, ctrl.Config, recorder)
 	ctrl.esCtrl = esc.New(c.ClientConfig, c.KubeClient, c.APIExtKubeClient, c.DBClient, c.StashClient, c.DynamicClient, c.AppCatalogClient, c.PromClient, c.CronController, ctrl.Config, recorder)
 	ctrl.edCtrl = edc.New(c.ClientConfig, c.KubeClient, c.APIExtKubeClient, c.DBClient, c.DynamicClient, c.AppCatalogClient, c.PromClient, c.CronController, ctrl.Config, recorder)
@@ -90,6 +92,7 @@ func (c *OperatorConfig) New() (*Controller, error) {
 	return ctrl, nil
 }
 
+// 这个 Init 里并没有初始化 什么 Queue对垒 之类的
 // InitInformer initializes MongoDB, DormantDB amd Snapshot watcher
 func (c *Controller) Init() error {
 	if err := c.EnsureCustomResourceDefinitions(); err != nil {

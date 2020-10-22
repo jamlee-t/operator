@@ -35,15 +35,21 @@ import (
 )
 
 type Controller struct {
+	// 内部含有很多 queue
 	amc.Config
 	*amc.Controller
 
 	// Prometheus client
 	promClient pcm.MonitoringV1Interface
+
+	// 内部含有其他的 controller
 	// Cron Controller
 	cronController snapc.CronControllerInterface
+
+	// 事件上报到 ApiServer, 存储到 ETCD
 	// Event Recorder
 	recorder record.EventRecorder
+
 	// labelselector for event-handler of Snapshot, Dormant and Job
 	selector labels.Selector
 
@@ -106,6 +112,7 @@ func (c *Controller) EnsureCustomResourceDefinitions() error {
 func (c *Controller) Init() error {
 	c.initWatcher()
 	c.DrmnQueue = drmnc.NewController(c.Controller, c, c.Config, nil, c.recorder).AddEventHandlerFunc(c.selector)
+	// c.Config 也等通于 c 吗？ 可以使用 c 的方法
 	c.SnapQueue, c.JobQueue = snapc.NewController(c.Controller, c, c.Config, nil, c.recorder).AddEventHandlerFunc(c.selector)
 	c.RSQueue = restoresession.NewController(c.Controller, c, c.Config, nil, c.recorder).AddEventHandlerFunc(c.selector)
 
@@ -117,13 +124,17 @@ func (c *Controller) RunControllers(stopCh <-chan struct{}) {
 	// Start Cron
 	c.cronController.StartCron()
 
+	// 把 mysql 的 queue 启动起来
 	// Watch x  TPR objects
 	c.myQueue.Run(stopCh)
+
 	c.DrmnQueue.Run(stopCh)
 	c.SnapQueue.Run(stopCh)
 	c.JobQueue.Run(stopCh)
 }
 
+// 是 Run Controller 先启动， 还是 Run 先启动呢？
+// 这个方法没有被调用
 // Blocks caller. Intended to be called as a Go routine.
 func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.StartAndRunControllers(stopCh)
@@ -141,11 +152,14 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	c.cronController.StopCron()
 }
 
+// 这个方法没有被调用
 // StartAndRunControllers starts InformetFactory and runs queue.worker
 func (c *Controller) StartAndRunControllers(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
 	log.Infoln("Starting KubeDB controller")
+
+	// Informer 也需要手动启动
 	c.KubeInformerFactory.Start(stopCh)
 	c.KubedbInformerFactory.Start(stopCh)
 
@@ -181,6 +195,7 @@ func (c *Controller) StartAndRunControllers(stopCh <-chan struct{}) {
 		}
 	}
 
+	// 启动本身的controller
 	c.RunControllers(stopCh)
 
 	<-stopCh

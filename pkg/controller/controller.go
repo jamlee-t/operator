@@ -42,6 +42,7 @@ type Controller struct {
 	mcCtrl *mcc.Controller
 }
 
+// 新建这个 controller manager
 func New(
 	clientConfig *rest.Config,
 	client kubernetes.Interface,
@@ -70,6 +71,7 @@ func New(
 	}
 }
 
+// 确定所有的crd已经正确安装
 // EnsureCustomResourceDefinitions ensures CRD for MySQl, DormantDatabase and Snapshot
 func (c *Controller) EnsureCustomResourceDefinitions() error {
 	log.Infoln("Ensuring CustomResourceDefinition...")

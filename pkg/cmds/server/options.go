@@ -61,6 +61,7 @@ func NewExtraOptions() *ExtraOptions {
 	}
 }
 
+// 给 flag set 加内容
 func (s *ExtraOptions) AddGoFlags(fs *flag.FlagSet) {
 	fs.StringVar(&s.GoverningService, "governing-service", s.GoverningService, "Governing service for database statefulset")
 	fs.BoolVar(&s.EnableRBAC, "rbac", s.EnableRBAC, "Enable RBAC for operator & offshoot Kubernetes objects")
@@ -76,12 +77,14 @@ func (s *ExtraOptions) AddGoFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&apis.EnableStatusSubresource, "enable-status-subresource", apis.EnableStatusSubresource, "If true, uses sub resource for KubeDB crds.")
 }
 
+// 给 flag set 加内容
 func (s *ExtraOptions) AddFlags(fs *pflag.FlagSet) {
 	pfs := flag.NewFlagSet("kubedb-server", flag.ExitOnError)
 	s.AddGoFlags(pfs)
 	fs.AddGoFlagSet(pfs)
 }
 
+// 从命令行读取的配置，应用到 controller.OperatorConfig 中。这是属于 controller 的范畴的内容
 func (s *ExtraOptions) ApplyTo(cfg *controller.OperatorConfig) error {
 	var err error
 
@@ -123,6 +126,8 @@ func (s *ExtraOptions) ApplyTo(cfg *controller.OperatorConfig) error {
 	if cfg.PromClient, err = prom.NewForConfig(cfg.ClientConfig); err != nil {
 		return err
 	}
+
+	// 共享的 informerFactory 结构
 	cfg.KubeInformerFactory = informers.NewSharedInformerFactory(cfg.KubeClient, cfg.ResyncPeriod)
 	cfg.KubedbInformerFactory = kubedbinformers.NewSharedInformerFactory(cfg.DBClient, cfg.ResyncPeriod)
 	cfg.StashInformerFactory = stashInformers.NewSharedInformerFactory(cfg.StashClient, cfg.ResyncPeriod)

@@ -9,15 +9,22 @@ import (
 	"kubedb.dev/apimachinery/client/clientset/versioned/typed/kubedb/v1alpha1/util"
 )
 
+// 把内部用到对象初始化
 func (c *Controller) initWatcher() {
 	c.myInformer = c.KubedbInformerFactory.Kubedb().V1alpha1().MySQLs().Informer()
+
+	// myQueue 是 Worker 对象. Worker 的 reconcile 方法是消息来的时候执行的
 	c.myQueue = queue.New("MySQL", c.MaxNumRequeues, c.NumThreads, c.runMySQL)
+
 	c.myLister = c.KubedbInformerFactory.Kubedb().V1alpha1().MySQLs().Lister()
+
 	c.myInformer.AddEventHandler(queue.NewObservableUpdateHandler(c.myQueue.GetQueue(), apis.EnableStatusSubresource))
 }
 
+// controller 过队列之后从这里执行任务
 func (c *Controller) runMySQL(key string) error {
 	log.Debugln("started processing, key:", key)
+	// 根据 key 取出对象
 	obj, exists, err := c.myInformer.GetIndexer().GetByKey(key)
 	if err != nil {
 		log.Errorf("Fetching object with key %s from store failed with %v", key, err)

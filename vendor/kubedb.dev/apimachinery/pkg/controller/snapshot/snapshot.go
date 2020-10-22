@@ -177,6 +177,7 @@ func (c *Controller) create(snapshot *api.Snapshot) error {
 		}
 	}
 
+	// 获取 job，前面也获取了 db
 	job, err := c.snapshotter.GetSnapshotter(snapshot)
 	if err != nil {
 		message := fmt.Sprintf("Failed to create Snapshotter Job. Reason: %v", err)

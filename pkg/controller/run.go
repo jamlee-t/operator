@@ -33,6 +33,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 func (c *Controller) StartAndRunControllers(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
+	// 难道是因为这里只用启动一次informer就可以了吗
 	log.Infoln("Starting KubeDB controller")
 	c.KubeInformerFactory.Start(stopCh)
 	c.KubedbInformerFactory.Start(stopCh)

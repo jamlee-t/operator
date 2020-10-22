@@ -93,6 +93,13 @@ type CompletedConfig struct {
 	*completedConfig
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// config 生成 server
+//
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+// 将 KubeDBServerConfig 转换为 CompletedConfig
 // Complete fills in any fields not set that are required to have valid data. It's mutating the receiver.
 func (c *KubeDBServerConfig) Complete() CompletedConfig {
 	completedCfg := completedConfig{
@@ -111,6 +118,7 @@ func (c *KubeDBServerConfig) Complete() CompletedConfig {
 
 // New returns a new instance of KubeDBServer from the given config.
 func (c completedConfig) New() (*KubeDBServer, error) {
+	// genericConfig 生成 genericServer
 	genericServer, err := c.GenericConfig.New("pack-server", genericapiserver.NewEmptyDelegate()) // completion is done in Complete, no need for a second time
 	if err != nil {
 		return nil, err
@@ -151,6 +159,7 @@ func (c completedConfig) New() (*KubeDBServer, error) {
 			})
 	}
 
+	// operatorConfig 生成 controller
 	ctrl, err := c.OperatorConfig.New()
 	if err != nil {
 		return nil, err
@@ -197,6 +206,7 @@ func (c completedConfig) New() (*KubeDBServer, error) {
 		}
 	}
 
+	// 在这里为什么注册这么多 admission ??
 	for i := range c.ExtraConfig.AdmissionHooks {
 		admissionHook := c.ExtraConfig.AdmissionHooks[i]
 		postStartName := postStartHookName(admissionHook)
