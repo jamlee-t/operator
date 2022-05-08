@@ -43,16 +43,10 @@ import (
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
-	reg_util "kmodules.xyz/client-go/admissionregistration/v1"
 	core_util "kmodules.xyz/client-go/core/v1"
 	"kmodules.xyz/client-go/discovery"
 	"kmodules.xyz/client-go/tools/clusterid"
 	appcat_cs "kmodules.xyz/custom-resources/client/clientset/versioned"
-)
-
-const (
-	mutatingWebhookConfig   = "mutators.kubedb.com"
-	validatingWebhookConfig = "validators.kubedb.com"
 )
 
 type OperatorConfig struct {
@@ -95,15 +89,16 @@ func (c *OperatorConfig) New() (*Controller, error) {
 	// WARNING: https://stackoverflow.com/a/46275411/244009
 	var auditor *auditlib.EventPublisher
 	if c.LicenseFile != "" && !c.License.DisableAnalytics() {
-		fn := auditlib.BillingEventCreator{
-			Mapper: mapper,
-		}
-		cid, err := clusterid.ClusterUID(c.KubeClient.CoreV1().Namespaces())
+		cmeta, err := clusterid.ClusterMetadata(c.KubeClient.CoreV1().Namespaces())
 		if err != nil {
-			return nil, fmt.Errorf("failed to detect cluster id, reason: %v", err)
+			return nil, fmt.Errorf("failed to extract cluster metadata, reason: %v", err)
+		}
+		fn := auditlib.BillingEventCreator{
+			Mapper:          mapper,
+			ClusterMetadata: cmeta,
 		}
 		auditor = auditlib.NewResilientEventPublisher(func() (*auditlib.NatsConfig, error) {
-			return auditlib.NewNatsConfig(cid, c.LicenseFile)
+			return auditlib.NewNatsConfig(cmeta.UID, c.LicenseFile)
 		}, mapper, fn.CreateEvent)
 		err = auditor.SetupSiteInfoPublisher(c.ClientConfig, c.KubeClient, c.KubeInformerFactory)
 		if err != nil {
@@ -158,16 +153,6 @@ func (c *OperatorConfig) New() (*Controller, error) {
 func (c *Controller) Init() error {
 	if err := c.EnsureCustomResourceDefinitions(); err != nil {
 		return err
-	}
-	if c.EnableMutatingWebhook {
-		if err := reg_util.UpdateMutatingWebhookCABundle(c.ClientConfig, mutatingWebhookConfig); err != nil {
-			return err
-		}
-	}
-	if c.EnableValidatingWebhook {
-		if err := reg_util.UpdateValidatingWebhookCABundle(c.ClientConfig, validatingWebhookConfig); err != nil {
-			return err
-		}
 	}
 
 	if err := c.esCtrl.Init(); err != nil {

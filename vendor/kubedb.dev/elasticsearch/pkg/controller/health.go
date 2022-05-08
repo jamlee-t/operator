@@ -27,6 +27,7 @@ import (
 	go_es "kubedb.dev/elasticsearch/pkg/util/go-es"
 
 	"github.com/pkg/errors"
+	"gomodules.xyz/pointer"
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -88,7 +89,7 @@ func (c *Controller) CheckElasticsearchHealthOnce() {
 				// Since the client was unable to connect the database,
 				// update "AcceptingConnection" to "false".
 				// update "Ready" to "false"
-				_, err = util.UpdateElasticsearchStatus(
+				_, err2 := util.UpdateElasticsearchStatus(
 					context.TODO(),
 					c.DBClient.KubedbV1alpha2(),
 					db.ObjectMeta,
@@ -99,7 +100,7 @@ func (c *Controller) CheckElasticsearchHealthOnce() {
 								Status:             core.ConditionFalse,
 								Reason:             api.DatabaseNotAcceptingConnectionRequest,
 								ObservedGeneration: db.Generation,
-								Message:            fmt.Sprintf("The Elasticsearch: %s/%s is not accepting client requests.", db.Namespace, db.Name),
+								Message:            fmt.Sprintf("The Elasticsearch: %s/%s is not accepting client requests. Error: %s.", db.Namespace, db.Name, err.Error()),
 							})
 						in.Conditions = kmapi.SetCondition(in.Conditions,
 							kmapi.Condition{
@@ -113,8 +114,8 @@ func (c *Controller) CheckElasticsearchHealthOnce() {
 					},
 					metav1.UpdateOptions{},
 				)
-				if err != nil {
-					klog.Errorf("Failed to update status for Elasticsearch: %s/%s with %s", db.Namespace, db.Name, err.Error())
+				if err2 != nil {
+					klog.Errorf("Failed to update status for Elasticsearch: %s/%s with %s", db.Namespace, db.Name, err2.Error())
 				}
 				// Since the client isn't created, skip rest operations.
 				return
@@ -160,9 +161,7 @@ func (c *Controller) CheckElasticsearchHealthOnce() {
 			// check if:
 			//	( status == green ) || ( status == yellow && (standalone-data-topology || standalone-data-combined))
 			if status == api.ElasticsearchStatusGreen ||
-				(status == api.ElasticsearchStatusYellow &&
-					((db.Spec.Topology != nil && db.Spec.Topology.Data.Replicas != nil && *db.Spec.Topology.Data.Replicas == int32(1)) ||
-						(db.Spec.Topology == nil && db.Spec.Replicas != nil && *db.Spec.Replicas == int32(1)))) {
+				(status == api.ElasticsearchStatusYellow && isStandaloneDataNodeCluster(db)) {
 				// Update "Ready" to "true".
 				_, err = util.UpdateElasticsearchStatus(
 					context.TODO(),
@@ -228,4 +227,32 @@ func (c *Controller) GetElasticsearchClient(db *api.Elasticsearch) (go_es.ESClie
 		return nil, err
 	}
 	return dbClient, nil
+}
+
+func isStandaloneDataNodeCluster(db *api.Elasticsearch) bool {
+	var dnCount int32
+	if db.Spec.Topology != nil {
+		if db.Spec.Topology.Data != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.Data.Replicas)
+		}
+		if db.Spec.Topology.DataHot != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.DataHot.Replicas)
+		}
+		if db.Spec.Topology.DataWarm != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.DataWarm.Replicas)
+		}
+		if db.Spec.Topology.DataCold != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.DataCold.Replicas)
+		}
+		if db.Spec.Topology.DataFrozen != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.DataFrozen.Replicas)
+		}
+		if db.Spec.Topology.DataContent != nil {
+			dnCount += pointer.Int32(db.Spec.Topology.DataContent.Replicas)
+		}
+	} else {
+		dnCount += pointer.Int32(db.Spec.Replicas)
+	}
+
+	return dnCount == 1
 }

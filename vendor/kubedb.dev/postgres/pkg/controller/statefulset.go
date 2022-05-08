@@ -40,8 +40,9 @@ import (
 )
 
 const (
-	PostgresInitContainerName = "postgres-init-container"
-	sharedTlsVolumeMountPath  = "/tls/certs"
+	PgEnforceFsGroupInitContainerName = "pg-fsgroup-init"
+	PostgresInitContainerName         = "postgres-init-container"
+	sharedTlsVolumeMountPath          = "/tls/certs"
 
 	clientTlsVolumeMountPath   = "/certs/client"
 	serverTlsVolumeMountPath   = "/certs/server"
@@ -74,7 +75,6 @@ func (c *Reconciler) ensureStatefulSet(
 	postgresVersion *catalog.PostgresVersion,
 	envList []core.EnvVar,
 ) (kutil.VerbType, error) {
-
 	if err := c.checkStatefulSet(db); err != nil {
 		return kutil.VerbUnchanged, err
 	}
@@ -109,6 +109,9 @@ func (c *Reconciler) ensureStatefulSet(
 			in.Spec.Template.Labels = db.PodLabels()
 			in.Spec.Template.Annotations = db.Spec.PodTemplate.Annotations
 			in.Spec.Template.Spec.InitContainers = core_util.UpsertContainers(in.Spec.Template.Spec.InitContainers, db.Spec.PodTemplate.Spec.InitContainers)
+			if db.Spec.EnforceFsGroup {
+				in.Spec.Template.Spec.InitContainers = getEnforceFsGroupInitContainers(in, postgresVersion)
+			}
 			in.Spec.Template.Spec.InitContainers = getInitContainers(in, db, postgresVersion)
 
 			in.Spec.Template.Spec.Containers = getContainers(in, db, postgresVersion, envList)
@@ -150,7 +153,6 @@ func (c *Reconciler) ensureStatefulSet(
 		},
 		metav1.PatchOptions{},
 	)
-
 	if err != nil {
 		return kutil.VerbUnchanged, err
 	}
@@ -222,7 +224,6 @@ func (c *Reconciler) checkStatefulSet(db *api.Postgres) error {
 }
 
 func getEnvForPostgres(db *api.Postgres, postgresVersion *catalog.PostgresVersion, envs []core.EnvVar) []core.EnvVar {
-
 	majorPGVersion, err := getMajorPgVersion(postgresVersion)
 	if err != nil {
 		klog.Error("couldn't get version's major part")
@@ -343,7 +344,6 @@ func getEnvForPostgres(db *api.Postgres, postgresVersion *catalog.PostgresVersio
 }
 
 func getEnvForCoordinator(db *api.Postgres, postgresVersion *catalog.PostgresVersion) []core.EnvVar {
-
 	majorPGVersion, err := getMajorPgVersion(postgresVersion)
 	if err != nil {
 		klog.Error("couldn't get version's major part")
@@ -455,6 +455,7 @@ func upsertUserEnv(statefulSet *apps.StatefulSet, postgress *api.Postgres) *apps
 	}
 	return statefulSet
 }
+
 func upsertPort(statefulSet *apps.StatefulSet) *apps.StatefulSet {
 	getPostgresPorts := func() []core.ContainerPort {
 		portList := []core.ContainerPort{
@@ -494,7 +495,6 @@ func upsertPort(statefulSet *apps.StatefulSet) *apps.StatefulSet {
 }
 
 func (c *Reconciler) upsertMonitoringContainer(statefulSet *apps.StatefulSet, db *api.Postgres, postgresVersion *catalog.PostgresVersion) *apps.StatefulSet {
-
 	if db.Spec.Monitor != nil && db.Spec.Monitor.Agent.Vendor() == mona.VendorPrometheus {
 		sslMode := string(db.Spec.SSLMode)
 		if sslMode == string(api.PostgresSSLModePrefer) || sslMode == string(api.PostgresSSLModeAllow) {
@@ -682,8 +682,8 @@ func upsertSharedRunScriptsVolume(volumes []core.Volume) []core.Volume {
 	volumes = core_util.UpsertVolume(volumes, configVolume)
 	return volumes
 }
-func upsertSharedScriptsVolume(volumes []core.Volume) []core.Volume {
 
+func upsertSharedScriptsVolume(volumes []core.Volume) []core.Volume {
 	configVolume := core.Volume{
 		Name: "scripts",
 		VolumeSource: core.VolumeSource{
@@ -694,8 +694,8 @@ func upsertSharedScriptsVolume(volumes []core.Volume) []core.Volume {
 
 	return volumes
 }
-func upsertSharedCertificatesVolume(volumes []core.Volume) []core.Volume {
 
+func upsertSharedCertificatesVolume(volumes []core.Volume) []core.Volume {
 	configVolume := core.Volume{
 		Name: sharedTlsVolumeName,
 		VolumeSource: core.VolumeSource{
@@ -706,6 +706,42 @@ func upsertSharedCertificatesVolume(volumes []core.Volume) []core.Volume {
 	volumes = core_util.UpsertVolume(volumes, configVolume)
 
 	return volumes
+}
+
+func getEnforceFsGroupInitContainers(statefulSet *apps.StatefulSet, postgresVersion *catalog.PostgresVersion) []core.Container {
+	volumeMounts := []core.VolumeMount{
+		{
+			Name:      "data",
+			MountPath: "/var/pv",
+		},
+	}
+	statefulSet.Spec.Template.Spec.InitContainers = core_util.UpsertContainer(
+		statefulSet.Spec.Template.Spec.InitContainers,
+		core.Container{
+			Name:  PgEnforceFsGroupInitContainerName,
+			Image: postgresVersion.Spec.InitContainer.Image,
+			Resources: core.ResourceRequirements{
+				Limits: core.ResourceList{
+					core.ResourceCPU:    resource.MustParse(".200"),
+					core.ResourceMemory: resource.MustParse("128Mi"),
+				},
+				Requests: core.ResourceList{
+					core.ResourceCPU:    resource.MustParse(".200"),
+					core.ResourceMemory: resource.MustParse("128Mi"),
+				},
+			},
+			Command: []string{
+				"chmod",
+				"0777",
+				"/var/pv",
+			},
+			SecurityContext: &core.SecurityContext{
+				RunAsUser:  pointer.Int64P(0),
+				RunAsGroup: pointer.Int64P(0),
+			},
+			VolumeMounts: volumeMounts,
+		})
+	return statefulSet.Spec.Template.Spec.InitContainers
 }
 
 func getInitContainers(statefulSet *apps.StatefulSet, db *api.Postgres, postgresVersion *catalog.PostgresVersion) []core.Container {
@@ -886,8 +922,6 @@ func getContainers(statefulSet *apps.StatefulSet, db *api.Postgres, postgresVers
 		}
 		coordinatorVolumeMounts = core_util.UpsertVolumeMount(coordinatorVolumeMounts, volumeMount)
 	}
-	// TODO: This defaulting should be removed once https://github.com/kubedb/apimachinery/pull/798 change is applied to existing CRDs
-	api.SetDefaultResourceLimits(&db.Spec.Coordinator.Resources, api.CoordinatorDefaultResources)
 	statefulSet.Spec.Template.Spec.Containers = core_util.UpsertContainer(
 		statefulSet.Spec.Template.Spec.Containers,
 		core.Container{

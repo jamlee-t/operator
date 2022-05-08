@@ -64,7 +64,7 @@ func (c *Controller) ensureStatefulSet(db *api.Redis, statefulSetName string, re
 		return kutil.VerbUnchanged, err
 	}
 
-	//ensure PDB for statefulSet
+	// ensure PDB for statefulSet
 	if err := c.CreateStatefulSetPodDisruptionBudget(statefulSet); err != nil {
 		return kutil.VerbUnchanged, err
 	}
@@ -207,10 +207,15 @@ func (c *Controller) checkStatefulSet(db *api.Redis, statefulSetName string) err
 }
 
 func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, removeSlave bool) (*apps.StatefulSet, kutil.VerbType, error) {
-	authSecret, err := c.Client.CoreV1().Secrets(db.Namespace).Get(context.TODO(), db.Spec.AuthSecret.Name, metav1.GetOptions{})
-	if err != nil {
-		return nil, "", err
+	var authSecret *core.Secret
+	var err error
+	if !db.Spec.DisableAuth {
+		authSecret, err = c.Client.CoreV1().Secrets(db.Namespace).Get(context.TODO(), db.Spec.AuthSecret.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, "", err
+		}
 	}
+
 	statefulSetMeta := metav1.ObjectMeta{
 		Name:      statefulSetName,
 		Namespace: db.Namespace,
@@ -218,12 +223,7 @@ func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, re
 
 	owner := metav1.NewControllerRef(db, api.SchemeGroupVersion.WithKind(api.ResourceKindRedis))
 
-	redisVersion, err := c.DBClient.CatalogV1alpha1().RedisVersions().Get(context.TODO(), string(db.Spec.Version), metav1.GetOptions{})
-	if err != nil {
-		return nil, kutil.VerbUnchanged, err
-	}
-
-	curVersion, err := semver.NewVersion(redisVersion.Spec.Version)
+	redisVersion, curVersion, err := c.getRedisVersion(db)
 	if err != nil {
 		return nil, kutil.VerbUnchanged, fmt.Errorf("can't get the version from RedisVersion spec")
 	}
@@ -250,17 +250,6 @@ func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, re
 		}
 		sentinelEnvs := []core.EnvVar{
 			{
-				Name: "SENTINEL_PASSWORD",
-				ValueFrom: &core.EnvVarSource{
-					SecretKeyRef: &core.SecretKeySelector{
-						LocalObjectReference: core.LocalObjectReference{
-							Name: sentinel.Spec.AuthSecret.Name,
-						},
-						Key: core.BasicAuthPasswordKey,
-					},
-				},
-			},
-			{
 				Name:  "SENTINEL_GOVERNING_SERVICE",
 				Value: fmt.Sprintf("%s.%s.svc", sentinel.GoverningServiceName(), sentinel.Namespace),
 			},
@@ -272,6 +261,23 @@ func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, re
 				Name:  "SENTINEL_REPLICAS",
 				Value: strconv.Itoa(int(pointer.Int32(sentinel.Spec.Replicas))),
 			},
+			{
+				Name:  "REDIS_CLUSTER_REGISTERED_NAME",
+				Value: GetRdClusterRegisteredNameInSentinel(db),
+			},
+		}
+		if !sentinel.Spec.DisableAuth {
+			redisModeEnvs = core_util.UpsertEnvVars(redisModeEnvs, core.EnvVar{
+				Name: "SENTINEL_PASSWORD",
+				ValueFrom: &core.EnvVarSource{
+					SecretKeyRef: &core.SecretKeySelector{
+						LocalObjectReference: core.LocalObjectReference{
+							Name: sentinel.Spec.AuthSecret.Name,
+						},
+						Key: core.BasicAuthPasswordKey,
+					},
+				},
+			})
 		}
 		redisModeEnvs = core_util.UpsertEnvVars(redisModeEnvs, sentinelEnvs...)
 	}
@@ -322,14 +328,14 @@ func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, re
 				in.Spec.Template.Spec.InitContainers,
 				getRedisInitContainer(redisVersion))
 			in.Spec.Template.Spec.Containers = core_util.UpsertContainer(in.Spec.Template.Spec.Containers,
-				getCoordinatorContainer(redisVersion, curVersion, db, redisModeEnvs))
+				getCoordinatorContainer(redisVersion, db, redisModeEnvs))
 		}
 
-		//upsert the container
+		// upsert the container
 		in.Spec.Template.Spec.Containers = core_util.UpsertContainer(in.Spec.Template.Spec.Containers, getRedisContainer(db, redisVersion, curVersion, redisModeEnvs))
 
 		if db.Spec.Monitor != nil && db.Spec.Monitor.Agent.Vendor() == mona.VendorPrometheus {
-			in.Spec.Template.Spec.Containers = core_util.UpsertContainer(in.Spec.Template.Spec.Containers, getMonitorContainer(db, redisVersion, curVersion, authSecret))
+			in.Spec.Template.Spec.Containers = core_util.UpsertContainer(in.Spec.Template.Spec.Containers, getMonitorContainer(db, redisVersion, authSecret))
 		}
 
 		in = upsertDataVolume(in, db)
@@ -369,13 +375,12 @@ func (c *Controller) createStatefulSet(db *api.Redis, statefulSetName string, re
 	}, metav1.PatchOptions{})
 }
 
-func getMonitorContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, curVersion *semver.Version, authSecret *core.Secret) core.Container {
-
+func getMonitorContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, authSecret *core.Secret) core.Container {
 	args := []string{
 		fmt.Sprintf("--web.listen-address=:%v", db.Spec.Monitor.Prometheus.Exporter.Port),
 		fmt.Sprintf("--web.telemetry-path=%v", db.StatsService().Path()),
 	}
-	if curVersion.Major() > 4 {
+	if !db.Spec.DisableAuth {
 		args = append(args, []string{
 			fmt.Sprintf("--redis.password=%s", authSecret.Data[core.BasicAuthPasswordKey]),
 		}...)
@@ -418,6 +423,7 @@ func getMonitorContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, cur
 	}
 	return container
 }
+
 func getRedisInitContainer(redisVersion *v1alpha1.RedisVersion) core.Container {
 	container := core.Container{
 		Name:            "redis-init",
@@ -432,16 +438,15 @@ func getRedisInitContainer(redisVersion *v1alpha1.RedisVersion) core.Container {
 	}
 	return container
 }
+
 func getRedisContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, curVersion *semver.Version, redisEnvs []core.EnvVar) core.Container {
-	var (
-		ports = []core.ContainerPort{
-			{
-				Name:          api.RedisDatabasePortName,
-				ContainerPort: api.RedisDatabasePort,
-				Protocol:      core.ProtocolTCP,
-			},
-		}
-	)
+	ports := []core.ContainerPort{
+		{
+			Name:          api.RedisDatabasePortName,
+			ContainerPort: api.RedisDatabasePort,
+			Protocol:      core.ProtocolTCP,
+		},
+	}
 	if db.Spec.Mode == api.RedisModeCluster {
 		ports = append(ports, core.ContainerPort{
 			Name:          api.RedisGossipPortName,
@@ -497,7 +502,7 @@ func getRedisContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, curVe
 		ReadinessProbe:  db.Spec.PodTemplate.Spec.ReadinessProbe,
 		Lifecycle:       db.Spec.PodTemplate.Spec.Lifecycle,
 	}
-	if curVersion.Major() > 4 {
+	if !db.Spec.DisableAuth {
 		container.Env = core_util.UpsertEnvVars(container.Env, []core.EnvVar{
 			{
 				Name: api.EnvRedisPassword,
@@ -584,7 +589,8 @@ func getRedisContainer(db *api.Redis, redisVersion *v1alpha1.RedisVersion, curVe
 	container.Env = core_util.UpsertEnvVars(container.Env, redisEnvs...)
 	return container
 }
-func getCoordinatorContainer(redisVersion *v1alpha1.RedisVersion, curVersion *semver.Version, db *api.Redis, redisEnvs []core.EnvVar) core.Container {
+
+func getCoordinatorContainer(redisVersion *v1alpha1.RedisVersion, db *api.Redis, redisEnvs []core.EnvVar) core.Container {
 	var volumeMounts []core.VolumeMount
 
 	if db.Spec.TLS != nil {
@@ -648,26 +654,13 @@ func getCoordinatorContainer(redisVersion *v1alpha1.RedisVersion, curVersion *se
 				Name:  "SENTINEL_GOVERNING_SERVICE",
 				Value: fmt.Sprintf("%s.%s.svc", db.Spec.SentinelRef.Name, db.Spec.SentinelRef.Namespace),
 			},
-			{
-				Name: api.EnvRedisPassword,
-				ValueFrom: &core.EnvVarSource{
-					SecretKeyRef: &core.SecretKeySelector{
-						LocalObjectReference: core.LocalObjectReference{
-							Name: db.Spec.AuthSecret.Name,
-						},
-						Key: core.BasicAuthPasswordKey,
-					},
-				},
-			},
 		}
-
 		container.Env = core_util.UpsertEnvVars(container.Env, envs...)
 
 	}
 	container.Env = core_util.UpsertEnvVars(container.Env, redisEnvs...)
 
-	if curVersion.Major() > 4 {
-
+	if !db.Spec.DisableAuth {
 		container.Env = core_util.UpsertEnvVars(container.Env, []core.EnvVar{
 			{
 				Name: api.EnvRedisPassword,
@@ -684,6 +677,7 @@ func getCoordinatorContainer(redisVersion *v1alpha1.RedisVersion, curVersion *se
 	}
 	return container
 }
+
 func upsertDataVolume(statefulSet *apps.StatefulSet, db *api.Redis) *apps.StatefulSet {
 	pvcSpec := db.Spec.Storage
 	if db.Spec.StorageType == api.StorageTypeEphemeral {
@@ -724,6 +718,7 @@ func upsertDataVolume(statefulSet *apps.StatefulSet, db *api.Redis) *apps.Statef
 	}
 	return statefulSet
 }
+
 func upsertRedisSentinelVolume(statefulSet *apps.StatefulSet) *apps.StatefulSet {
 	Volumes := []core.Volume{
 		{
@@ -844,7 +839,6 @@ func upsertUserEnv(statefulset *apps.StatefulSet, db *api.Redis) *apps.StatefulS
 }
 
 func upsertRedisConfig(statefulSet *apps.StatefulSet, db *api.Redis) *apps.StatefulSet {
-
 	for i, container := range statefulSet.Spec.Template.Spec.Containers {
 		if container.Name == api.ResourceSingularRedis {
 			configVolumeMount := core.VolumeMount{
@@ -860,7 +854,7 @@ func upsertRedisConfig(statefulSet *apps.StatefulSet, db *api.Redis) *apps.State
 				VolumeSource: core.VolumeSource{
 					Secret: &core.SecretVolumeSource{
 						SecretName:  db.ConfigSecretName(),
-						DefaultMode: pointer.Int32P(0777),
+						DefaultMode: pointer.Int32P(0o777),
 					},
 				},
 			}

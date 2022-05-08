@@ -42,19 +42,10 @@ func (es *Elasticsearch) EnsureMasterNodes() (kutil.VerbType, error) {
 		replicas = masterNode.Replicas
 	}
 
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := masterNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Following are for Master node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "false",
@@ -90,6 +81,12 @@ func (es *Elasticsearch) EnsureMasterNodes() (kutil.VerbType, error) {
 
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
+
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if masterNode.HeapSizePercentage == nil {
+		masterNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, &masterNode)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
@@ -129,19 +126,10 @@ func (es *Elasticsearch) EnsureDataNodes() (kutil.VerbType, error) {
 		es.db.NodeRoleSpecificLabelKey(api.ElasticsearchNodeRoleTypeData): api.ElasticsearchNodeRoleSet,
 	}
 
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := dataNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Following are for Data node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "false",
@@ -161,6 +149,12 @@ func (es *Elasticsearch) EnsureDataNodes() (kutil.VerbType, error) {
 
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
+
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if dataNode.HeapSizePercentage == nil {
+		dataNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, dataNode)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
@@ -192,7 +186,6 @@ func (es *Elasticsearch) EnsureDataNodes() (kutil.VerbType, error) {
 	}
 
 	return es.ensureStatefulSet(dataNode, statefulSetName, labels, replicas, string(api.ElasticsearchNodeRoleTypeData), envList, initEnvList)
-
 }
 
 func (es *Elasticsearch) EnsureIngestNodes() (kutil.VerbType, error) {
@@ -202,19 +195,10 @@ func (es *Elasticsearch) EnsureIngestNodes() (kutil.VerbType, error) {
 		es.db.NodeRoleSpecificLabelKey(api.ElasticsearchNodeRoleTypeIngest): api.ElasticsearchNodeRoleSet,
 	}
 
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := ingestNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Following are for Ingest node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "true",
@@ -234,6 +218,12 @@ func (es *Elasticsearch) EnsureIngestNodes() (kutil.VerbType, error) {
 
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
+
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if ingestNode.HeapSizePercentage == nil {
+		ingestNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, &ingestNode)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
@@ -284,19 +274,10 @@ func (es *Elasticsearch) EnsureCombinedNode() (kutil.VerbType, error) {
 		replicas = combinedNode.Replicas
 	}
 
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := combinedNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Followings are for Combined node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "true",
@@ -333,6 +314,12 @@ func (es *Elasticsearch) EnsureCombinedNode() (kutil.VerbType, error) {
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
 
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if combinedNode.HeapSizePercentage == nil {
+		combinedNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, combinedNode)
+
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
 		{
@@ -359,7 +346,6 @@ func (es *Elasticsearch) EnsureCombinedNode() (kutil.VerbType, error) {
 
 	// For affinity, NodeRoleIngest is used.
 	return es.ensureStatefulSet(combinedNode, statefulSetName, labels, replicas, string(api.ElasticsearchNodeRoleTypeIngest), envList, initEnvList)
-
 }
 
 // Use ElasticsearchNode struct for combined nodes too,
@@ -386,20 +372,10 @@ func (es *Elasticsearch) EnsureDataHotNode() (kutil.VerbType, error) {
 	labels := map[string]string{
 		es.db.NodeRoleSpecificLabelKey(api.ElasticsearchNodeRoleTypeDataHot): api.ElasticsearchNodeRoleSet,
 	}
-
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := dataHotNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Following are for Data node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "false",
@@ -427,6 +403,12 @@ func (es *Elasticsearch) EnsureDataHotNode() (kutil.VerbType, error) {
 
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
+
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if dataHotNode.HeapSizePercentage == nil {
+		dataHotNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, dataHotNode)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
@@ -459,6 +441,7 @@ func (es *Elasticsearch) EnsureDataHotNode() (kutil.VerbType, error) {
 
 	return es.ensureStatefulSet(dataHotNode, statefulSetName, labels, replicas, string(api.ElasticsearchNodeRoleTypeDataHot), envList, initEnvList)
 }
+
 func (es *Elasticsearch) EnsureDataWarmNode() (kutil.VerbType, error) {
 	if es.db.Spec.Topology.DataWarm == nil {
 		return kutil.VerbUnchanged, nil
@@ -468,20 +451,10 @@ func (es *Elasticsearch) EnsureDataWarmNode() (kutil.VerbType, error) {
 	labels := map[string]string{
 		es.db.NodeRoleSpecificLabelKey(api.ElasticsearchNodeRoleTypeDataWarm): api.ElasticsearchNodeRoleSet,
 	}
-
-	heapSize := int64(api.ElasticsearchMinHeapSize) // 128mb
-	if limit, found := dataWarmNode.Resources.Limits[core.ResourceMemory]; found && limit.Value() > 0 {
-		heapSize = heap.GetHeapSizeFromMemory(limit.Value())
-	}
-
 	// Environment variable list for main container.
 	// These are node specific, i.e. changes depending on node type.
 	// Following are for Data node:
 	envList := []core.EnvVar{
-		{
-			Name:  "ES_JAVA_OPTS",
-			Value: fmt.Sprintf("-Xms%v -Xmx%v", heapSize, heapSize),
-		},
 		{
 			Name:  "node.ingest",
 			Value: "false",
@@ -509,6 +482,12 @@ func (es *Elasticsearch) EnsureDataWarmNode() (kutil.VerbType, error) {
 
 	// add/overwrite user provided env; these are provided via crd spec
 	envList = core_util.UpsertEnvVars(envList, es.db.Spec.PodTemplate.Spec.Env...)
+
+	// if Local.heapSizePercentage is empty, use Global.heapSizePercentage
+	if dataWarmNode.HeapSizePercentage == nil {
+		dataWarmNode.HeapSizePercentage = es.db.Spec.HeapSizePercentage
+	}
+	envList = heap.UpsertJavaOptsEnv(envList, api.ElasticsearchJavaOptsEnv, dataWarmNode)
 
 	// Environment variables for init container (i.e. config-merger)
 	initEnvList := []core.EnvVar{
@@ -541,18 +520,23 @@ func (es *Elasticsearch) EnsureDataWarmNode() (kutil.VerbType, error) {
 
 	return es.ensureStatefulSet(dataWarmNode, statefulSetName, labels, replicas, string(api.ElasticsearchNodeRoleTypeDataWarm), envList, initEnvList)
 }
+
 func (es *Elasticsearch) EnsureDataColdNode() (kutil.VerbType, error) {
 	return kutil.VerbUnchanged, nil
 }
+
 func (es *Elasticsearch) EnsureDataFrozenNode() (kutil.VerbType, error) {
 	return kutil.VerbUnchanged, nil
 }
+
 func (es *Elasticsearch) EnsureMLNode() (kutil.VerbType, error) {
 	return kutil.VerbUnchanged, nil
 }
+
 func (es *Elasticsearch) EnsureTransformNode() (kutil.VerbType, error) {
 	return kutil.VerbUnchanged, nil
 }
+
 func (es *Elasticsearch) EnsureCoordinatingNode() (kutil.VerbType, error) {
 	return kutil.VerbUnchanged, nil
 }

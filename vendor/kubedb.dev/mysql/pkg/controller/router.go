@@ -31,7 +31,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kutil "kmodules.xyz/client-go"
-	kmapi "kmodules.xyz/client-go/api/v1"
 	app_util "kmodules.xyz/client-go/apps/v1"
 	core_util "kmodules.xyz/client-go/core/v1"
 	meta_util "kmodules.xyz/client-go/meta"
@@ -67,11 +66,6 @@ client_ssl_key=/etc/mysql/certs/server.key
 )
 
 func (c *Controller) ensureRouter(db *api.MySQL) error {
-	//router will be created after the server is ready
-	if !kmapi.IsConditionTrue(db.Status.Conditions, api.ServerReady) {
-		return nil
-	}
-
 	_, vt, err := c.createOrPatchRouterStatefulSet(db)
 	if err != nil {
 		return err
@@ -250,7 +244,6 @@ func (c *Controller) createOrPatchRouterStatefulSet(db *api.MySQL) (*apps.Statef
 		},
 		metav1.PatchOptions{},
 	)
-
 }
 
 func upsertRouterEnv(sts *apps.StatefulSet, db *api.MySQL) *apps.StatefulSet {
@@ -378,7 +371,7 @@ func upsertRouterTLSVolume(sts *apps.StatefulSet, db *api.MySQL) *apps.StatefulS
 			volume,
 		)
 	} else {
-		//clean up volume
+		// clean up volume
 		for i, container := range sts.Spec.Template.Spec.Containers {
 			if container.Name == api.MySQLRouterContainerName {
 				sts.Spec.Template.Spec.Containers[i].VolumeMounts = core_util.EnsureVolumeMountDeleted(sts.Spec.Template.Spec.Containers[i].VolumeMounts, api.MySQLRouterTLSDirectoryName)

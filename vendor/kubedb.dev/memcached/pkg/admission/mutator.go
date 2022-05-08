@@ -20,19 +20,19 @@ import (
 	"fmt"
 	"sync"
 
-	"kubedb.dev/apimachinery/apis/kubedb"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
 
 	"github.com/pkg/errors"
 	"gomodules.xyz/pointer"
-	admission "k8s.io/api/admission/v1beta1"
+	admission "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	meta_util "kmodules.xyz/client-go/meta"
-	hookapi "kmodules.xyz/webhook-runtime/admission/v1beta1"
+	hookapi "kmodules.xyz/webhook-runtime/admission/v1"
+	"kmodules.xyz/webhook-runtime/builder"
 )
 
 type MemcachedMutator struct {
@@ -45,12 +45,7 @@ type MemcachedMutator struct {
 var _ hookapi.AdmissionHook = &MemcachedMutator{}
 
 func (a *MemcachedMutator) Resource() (plural schema.GroupVersionResource, singular string) {
-	return schema.GroupVersionResource{
-			Group:    kubedb.MutatorGroupName,
-			Version:  "v1alpha1",
-			Resource: api.ResourcePluralMemcached,
-		},
-		api.ResourceSingularMemcached
+	return builder.MutatorResource(api.Kind(api.ResourceKindMemcached))
 }
 
 func (a *MemcachedMutator) Initialize(config *rest.Config, stopCh <-chan struct{}) error {

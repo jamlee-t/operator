@@ -21,13 +21,12 @@ import (
 	"fmt"
 	"sync"
 
-	"kubedb.dev/apimachinery/apis/kubedb"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
 	amv "kubedb.dev/apimachinery/pkg/validator"
 
 	"github.com/pkg/errors"
-	admission "k8s.io/api/admission/v1beta1"
+	admission "k8s.io/api/admission/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -36,7 +35,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	meta_util "kmodules.xyz/client-go/meta"
-	hookapi "kmodules.xyz/webhook-runtime/admission/v1beta1"
+	hookapi "kmodules.xyz/webhook-runtime/admission/v1"
+	"kmodules.xyz/webhook-runtime/builder"
 )
 
 // PerconaXtraDBValidator implements the AdmissionHook interface to validate the PerconaXtraDB resources
@@ -58,12 +58,7 @@ var forbiddenEnvVars = []string{
 
 // Resource is the resource to use for hosting validating admission webhook.
 func (a *PerconaXtraDBValidator) Resource() (plural schema.GroupVersionResource, singular string) {
-	return schema.GroupVersionResource{
-			Group:    kubedb.ValidatorGroupName,
-			Version:  "v1alpha1",
-			Resource: api.ResourcePluralPerconaXtraDB,
-		},
-		api.ResourceSingularPerconaXtraDB
+	return builder.ValidatorResource(api.Kind(api.ResourceKindPerconaXtraDB))
 }
 
 // Initialize is called as a post-start hook

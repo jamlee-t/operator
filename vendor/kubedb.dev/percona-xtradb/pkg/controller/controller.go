@@ -42,7 +42,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
-	reg_util "kmodules.xyz/client-go/admissionregistration/v1"
 	"kmodules.xyz/client-go/apiextensions"
 	"kmodules.xyz/client-go/discovery"
 	meta_util "kmodules.xyz/client-go/meta"
@@ -129,15 +128,6 @@ func (c *Controller) RunControllers(stopCh <-chan struct{}) {
 func (c *Controller) Run(stopCh <-chan struct{}) {
 	go c.StartAndRunControllers(stopCh)
 
-	if c.EnableMutatingWebhook {
-		cancel1, _ := reg_util.SyncMutatingWebhookCABundle(c.ClientConfig, kubedb.MutatorGroupName)
-		defer cancel1()
-	}
-	if c.EnableValidatingWebhook {
-		cancel2, _ := reg_util.SyncValidatingWebhookCABundle(c.ClientConfig, kubedb.ValidatorGroupName)
-		defer cancel2()
-	}
-
 	<-stopCh
 }
 
@@ -191,7 +181,6 @@ func (c *Controller) pushFailureEvent(db *api.PerconaXtraDB, reason string) {
 		in.ObservedGeneration = db.Generation
 		return db.UID, in
 	}, metav1.UpdateOptions{})
-
 	if err != nil {
 		c.Recorder.Eventf(
 			db,

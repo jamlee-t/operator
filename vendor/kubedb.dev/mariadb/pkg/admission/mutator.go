@@ -19,19 +19,19 @@ package admission
 import (
 	"sync"
 
-	"kubedb.dev/apimachinery/apis/kubedb"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
 
 	"github.com/pkg/errors"
-	admission "k8s.io/api/admission/v1beta1"
+	admission "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	core_util "kmodules.xyz/client-go/core/v1"
 	meta_util "kmodules.xyz/client-go/meta"
-	hookapi "kmodules.xyz/webhook-runtime/admission/v1beta1"
+	hookapi "kmodules.xyz/webhook-runtime/admission/v1"
+	"kmodules.xyz/webhook-runtime/builder"
 )
 
 // MariaDBMutator implements the AdmissionHook interface to mutate the MariaDB resources
@@ -48,12 +48,7 @@ var _ hookapi.AdmissionHook = &MariaDBMutator{}
 
 // Resource is the resource to use for hosting mutating admission webhook.
 func (a *MariaDBMutator) Resource() (plural schema.GroupVersionResource, singular string) {
-	return schema.GroupVersionResource{
-			Group:    kubedb.MutatorGroupName,
-			Version:  "v1alpha1",
-			Resource: api.ResourcePluralMariaDB,
-		},
-		api.ResourceSingularMariaDB
+	return builder.MutatorResource(api.Kind(api.ResourceKindMariaDB))
 }
 
 // Initialize is called as a post-start hook

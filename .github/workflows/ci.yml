@@ -7,16 +7,21 @@ on:
   push:
     branches:
       - master
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Go 1.17
+      - name: Set up Go 1.18
         uses: actions/setup-go@v1
         with:
-          go-version: 1.17
+          go-version: 1.18
         id: go
 
       - uses: actions/checkout@v1
@@ -33,6 +38,43 @@ jobs:
           sudo apt-get -qq update || true
           sudo apt-get install -y bzr
 
+      - name: Prepare git
+        env:
+          GITHUB_USER: 1gtm
+          GITHUB_TOKEN: ${{ secrets.LGTM_GITHUB_TOKEN }}
+        run: |
+          set -x
+          git config --global user.name "1gtm"
+          git config --global user.email "1gtm@appscode.com"
+          git config --global \
+            url."https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com".insteadOf \
+            "https://github.com"
+          # git remote set-url origin https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
+
+      - name: Prepare Go for private repos
+        run: |
+          go env -w GOPRIVATE=go.appscode.dev/*,github.com/appscode/*,kubedb.dev/*
+
       - name: Run checks
         run: |
           make ci
+
+      - name: Publish to Docker Registry
+        id: publish-to-docker-hub
+        env:
+          REGISTRY: appscodeci
+          DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          USERNAME: 1gtm
+        run: |
+          docker login --username ${USERNAME} --password ${DOCKER_TOKEN}
+          make push
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.publish-to-docker-hub.outputs.TAG_PROD }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'

@@ -33,8 +33,8 @@ import (
 	ofst "kmodules.xyz/offshoot-api/api/v1"
 )
 
-func (c *Reconciler) ensureMongosNode(db *api.MongoDB) (*apps.StatefulSet, kutil.VerbType, error) {
-	mongodbVersion, err := c.DBClient.CatalogV1alpha1().MongoDBVersions().Get(context.TODO(), string(db.Spec.Version), metav1.GetOptions{})
+func (r *Reconciler) ensureMongosNode(db *api.MongoDB) (*apps.StatefulSet, kutil.VerbType, error) {
+	mongodbVersion, err := r.DBClient.CatalogV1alpha1().MongoDBVersions().Get(context.TODO(), string(db.Spec.Version), metav1.GetOptions{})
 	if err != nil {
 		return nil, kutil.VerbUnchanged, err
 	}
@@ -61,11 +61,11 @@ func (c *Reconciler) ensureMongosNode(db *api.MongoDB) (*apps.StatefulSet, kutil
 		"--clusterAuthMode=" + string(clusterAuth),
 		"--keyFile=" + api.MongoDBConfigDirectoryPath + "/" + api.MongoDBKeyForKeyFile,
 	}
-	if c.enableIPv6 {
+	if r.enableIPv6 {
 		args = append(args, "--ipv6")
 	}
 
-	sslArgs, err := c.getTLSArgs(db, mongodbVersion)
+	sslArgs, err := r.getTLSArgs(db, mongodbVersion)
 	if err != nil {
 		return &apps.StatefulSet{}, "", err
 	}
@@ -165,7 +165,7 @@ func (c *Reconciler) ensureMongosNode(db *api.MongoDB) (*apps.StatefulSet, kutil
 		isMongos:       true,
 	}
 
-	return c.ensureStatefulSet(db, opts)
+	return r.ensureStatefulSet(db, opts)
 }
 
 func mongosInitContainer(
@@ -175,7 +175,6 @@ func mongosInitContainer(
 	envList []core.EnvVar,
 	scriptName string,
 ) (core.Container, []core.Volume) {
-
 	envList = core_util.UpsertEnvVars(envList, podTemplate.Spec.Env...)
 
 	// mongodb.Spec.SSLMode & mongodb.Spec.ClusterAuthMode can be empty if upgraded operator from
@@ -264,7 +263,7 @@ func mongosInitContainer(
 			Name: api.MongoDBInitialKeyDirectoryName, // FIXIT: mounted where?
 			VolumeSource: core.VolumeSource{
 				Secret: &core.SecretVolumeSource{
-					DefaultMode: pointer.Int32P(0400),
+					DefaultMode: pointer.Int32P(0o400),
 					SecretName:  db.Spec.KeyFileSecret.Name,
 				},
 			},

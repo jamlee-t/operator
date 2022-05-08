@@ -68,7 +68,6 @@ func (es *Elasticsearch) ensureStatefulSet(
 	envList []core.EnvVar,
 	initEnvList []core.EnvVar,
 ) (kutil.VerbType, error) {
-
 	if esNode == nil {
 		return kutil.VerbUnchanged, errors.New("ElasticsearchNode is empty")
 	}
@@ -171,7 +170,6 @@ func (es *Elasticsearch) ensureStatefulSet(
 
 		return in
 	}, metav1.PatchOptions{})
-
 	if err != nil {
 		return kutil.VerbUnchanged, errors.Wrap(err, "failed to create or patch statefulset")
 	}
@@ -554,6 +552,7 @@ func (es *Elasticsearch) upsertConfigMergerInitContainer(initCon []core.Containe
 		Name:            api.ElasticsearchInitConfigMergerContainerName,
 		Image:           es.esVersion.Spec.InitContainer.YQImage,
 		ImagePullPolicy: core.PullIfNotPresent,
+		Command:         []string{"/usr/local/bin/config-merger.sh"},
 		Env:             envList,
 		VolumeMounts:    volumeMounts,
 	}
@@ -582,7 +581,6 @@ func (es *Elasticsearch) checkStatefulSet(sName string) error {
 }
 
 func (es *Elasticsearch) upsertContainerEnv(envList []core.EnvVar) ([]core.EnvVar, error) {
-
 	envList = core_util.UpsertEnvVars(envList, []core.EnvVar{
 		{
 			Name: "node.name",
@@ -607,7 +605,7 @@ func (es *Elasticsearch) upsertContainerEnv(envList []core.EnvVar) ([]core.EnvVa
 		return nil, err
 	}
 
-	if version.Major() == 7 {
+	if version.Major() >= 7 {
 		envList = core_util.UpsertEnvVars(envList, core.EnvVar{
 			Name:  "discovery.seed_hosts",
 			Value: es.db.MasterDiscoveryServiceName(),
@@ -619,10 +617,34 @@ func (es *Elasticsearch) upsertContainerEnv(envList []core.EnvVar) ([]core.EnvVa
 			Value: "/usr/share/elasticsearch/jdk",
 		})
 	} else {
+		replicas := es.db.Spec.Replicas
+		if es.db.Spec.Topology != nil {
+			replicas = es.db.Spec.Topology.Master.Replicas
+		}
+		envList = core_util.UpsertEnvVars(envList, core.EnvVar{
+			Name:  "discovery.zen.minimum_master_nodes",
+			Value: fmt.Sprintf("%v", (*replicas/2)+1),
+		})
 		envList = core_util.UpsertEnvVars(envList, core.EnvVar{
 			Name:  "discovery.zen.ping.unicast.hosts",
 			Value: es.db.MasterDiscoveryServiceName(),
 		})
+	}
+	// For elasticsearch 5.x, we need to create the security index by running sgadmin from script.
+	//	`ENABLE_SSL` and `DISABLE_SECURITY` env is used in that script.
+	if version.Major() <= 5 {
+		if es.db.Spec.EnableSSL {
+			envList = core_util.UpsertEnvVars(envList, core.EnvVar{
+				Name:  "ENABLE_SSL",
+				Value: "true",
+			})
+		}
+		if es.db.Spec.DisableSecurity {
+			envList = core_util.UpsertEnvVars(envList, core.EnvVar{
+				Name:  "DISABLE_SECURITY",
+				Value: "true",
+			})
+		}
 	}
 
 	return envList, nil

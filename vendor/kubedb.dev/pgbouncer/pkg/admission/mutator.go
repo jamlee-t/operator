@@ -19,18 +19,18 @@ package admission
 import (
 	"sync"
 
-	"kubedb.dev/apimachinery/apis/kubedb"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
 
 	"gomodules.xyz/pointer"
-	admission "k8s.io/api/admission/v1beta1"
+	admission "k8s.io/api/admission/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	meta_util "kmodules.xyz/client-go/meta"
-	hookapi "kmodules.xyz/webhook-runtime/admission/v1beta1"
+	hookapi "kmodules.xyz/webhook-runtime/admission/v1"
+	"kmodules.xyz/webhook-runtime/builder"
 )
 
 const (
@@ -47,12 +47,7 @@ type PgBouncerMutator struct {
 var _ hookapi.AdmissionHook = &PgBouncerMutator{}
 
 func (a *PgBouncerMutator) Resource() (plural schema.GroupVersionResource, singular string) {
-	return schema.GroupVersionResource{
-			Group:    kubedb.MutatorGroupName,
-			Version:  "v1alpha1",
-			Resource: api.ResourcePluralPgBouncer,
-		},
-		api.ResourceSingularPgBouncer
+	return builder.MutatorResource(api.Kind(api.ResourceKindPgBouncer))
 }
 
 func (a *PgBouncerMutator) Initialize(config *rest.Config, stopCh <-chan struct{}) error {
@@ -94,15 +89,13 @@ func (a *PgBouncerMutator) Admit(req *admission.AdmissionRequest) *admission.Adm
 	}
 
 	pbMod := setDefaultValues(obj.(*api.PgBouncer).DeepCopy())
-	if pbMod != nil {
-		patch, err := meta_util.CreateJSONPatch(req.Object.Raw, pbMod)
-		if err != nil {
-			return hookapi.StatusInternalServerError(err)
-		}
-		status.Patch = patch
-		patchType := admission.PatchTypeJSONPatch
-		status.PatchType = &patchType
+	patch, err := meta_util.CreateJSONPatch(req.Object.Raw, pbMod)
+	if err != nil {
+		return hookapi.StatusInternalServerError(err)
 	}
+	status.Patch = patch
+	patchType := admission.PatchTypeJSONPatch
+	status.PatchType = &patchType
 
 	status.Allowed = true
 	return status
@@ -114,7 +107,7 @@ func setDefaultValues(db *api.PgBouncer) runtime.Object {
 		db.Spec.Replicas = pointer.Int32P(1)
 	}
 
-	//TODO: Make sure an image path is set
+	// TODO: Make sure an image path is set
 
 	if db.Spec.ConnectionPool != nil {
 		if db.Spec.ConnectionPool.Port == nil {

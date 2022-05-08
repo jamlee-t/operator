@@ -70,7 +70,7 @@ TAG              := $(VERSION)_$(OS)_$(ARCH)
 TAG_PROD         := $(TAG)
 TAG_DBG          := $(VERSION)-dbg_$(OS)_$(ARCH)
 
-GO_VERSION       ?= 1.17
+GO_VERSION       ?= 1.18
 BUILD_IMAGE      ?= appscode/golang-dev:$(GO_VERSION)
 
 OUTBIN = bin/$(OS)_$(ARCH)/$(BIN)
@@ -96,9 +96,6 @@ DOCKER_REPO_ROOT := /go/src/$(GO_PKG)/$(REPO)
 # If you want to build all containers, see the 'all-container' rule.
 # If you want to build AND push all containers, see the 'all-push' rule.
 all: fmt build
-
-KUBE_NAMESPACE ?= kube-system
-LICENSE_FILE   ?=
 
 include Makefile.env
 include Makefile.stash
@@ -240,6 +237,7 @@ push: bin/.push-$(DOTFILE_IMAGE)-PROD bin/.push-$(DOTFILE_IMAGE)-DBG
 bin/.push-$(DOTFILE_IMAGE)-%: bin/.container-$(DOTFILE_IMAGE)-%
 	@docker push $(IMAGE):$(TAG_$*)
 	@echo "pushed: $(IMAGE):$(TAG_$*)"
+	@echo ::set-output name=TAG_$*::$(IMAGE):$(TAG_$*)
 	@echo
 
 .PHONY: docker-manifest
@@ -342,8 +340,10 @@ lint: $(BUILD_DIRS)
 $(BUILD_DIRS):
 	@mkdir -p $@
 
-REGISTRY_SECRET 	?=
-IMAGE_PULL_POLICY 	?= Always
+REGISTRY_SECRET   ?=
+KUBE_NAMESPACE    ?= kubedb
+LICENSE_FILE      ?=
+IMAGE_PULL_POLICY ?= IfNotPresent
 
 ifeq ($(strip $(REGISTRY_SECRET)),)
 	IMAGE_PULL_SECRETS =
@@ -353,22 +353,20 @@ endif
 
 .PHONY: install
 install:
-	cd ../installer; \
-	helm install kubedb-community charts/kubedb-community --wait  \
-		--namespace=$(KUBE_NAMESPACE)        \
+	@cd ../installer; \
+	helm upgrade -i kubedb-provisioner charts/kubedb-provisioner --wait  \
+		--namespace=$(KUBE_NAMESPACE) --create-namespace \
 		--set-file license=$(LICENSE_FILE)   \
 		--set operator.registry=$(REGISTRY)  \
 		--set operator.repository=operator   \
 		--set operator.tag=$(TAG)            \
 		--set imagePullPolicy=$(IMAGE_PULL_POLICY)	\
 		$(IMAGE_PULL_SECRETS);               		\
-	kubectl wait --for=condition=Available apiservice -l 'app.kubernetes.io/name=kubedb,app.kubernetes.io/instance=kubedb-community' --timeout=5m; \
 	until kubectl get crds mongodbversions.catalog.kubedb.com -o=jsonpath='{.items[0].metadata.name}' &> /dev/null; do sleep 1; done; \
-	kubectl wait --for=condition=NamesAccepted crds -l app.kubernetes.io/name=kubedb --timeout=5m; \
-	kubectl get crds -l app.kubernetes.io/name=kubedb -o yaml
-	cd ../installer; \
-	helm install kubedb-catalog charts/kubedb-catalog \
-		--namespace=$(KUBE_NAMESPACE)        \
+	kubectl wait --for=condition=NamesAccepted crds -l app.kubernetes.io/name=kubedb --timeout=5m
+	@cd ../installer; \
+	helm upgrade -i kubedb-catalog charts/kubedb-catalog \
+		--namespace=$(KUBE_NAMESPACE) --create-namespace \
 		--set catalog.elasticsearch=true     \
 		--set catalog.etcd=true              \
 		--set catalog.mariadb=true           \
@@ -385,7 +383,7 @@ install:
 uninstall:
 	@cd ../installer; \
 	helm uninstall kubedb-catalog --namespace=$(KUBE_NAMESPACE) || true; \
-	helm uninstall kubedb-community --namespace=$(KUBE_NAMESPACE) || true
+	helm uninstall kubedb-provisioner --namespace=$(KUBE_NAMESPACE) || true
 
 .PHONY: purge
 purge: uninstall
@@ -468,8 +466,12 @@ release:
 clean:
 	rm -rf .go bin
 
+# make and load docker image to kind cluster
 .PHONY: push-to-kind
 push-to-kind: container
 	@echo "Loading docker image into kind cluster...."
 	@kind load docker-image $(IMAGE):$(TAG)
 	@echo "Image has been pushed successfully into kind cluster."
+
+.PHONY: deploy-to-kind
+deploy-to-kind: push-to-kind install

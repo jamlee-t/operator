@@ -38,7 +38,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
-	reg_util "kmodules.xyz/client-go/admissionregistration/v1"
 	"kmodules.xyz/client-go/apiextensions"
 	core_util "kmodules.xyz/client-go/core/v1"
 	"kmodules.xyz/client-go/discovery"
@@ -67,7 +66,7 @@ type Controller struct {
 	rsInformer cache.SharedIndexInformer
 	rsLister   api_listers.RedisSentinelLister
 
-	//Redis StatefulSet Informer
+	// Redis StatefulSet Informer
 	rdStsInformer cache.SharedIndexInformer
 }
 
@@ -146,7 +145,7 @@ func (c *Controller) RunControllers(stopCh <-chan struct{}) {
 
 // Blocks caller. Intended to be called as a Go routine.
 func (c *Controller) Run(stopCh <-chan struct{}) {
-	go c.StartAndRunControllers(stopCh)
+	c.StartAndRunControllers(stopCh)
 }
 
 // StartAndRunControllers starts InformerFactory and runs queue.worker
@@ -180,15 +179,6 @@ func (c *Controller) StartAndRunControllers(stopCh <-chan struct{}) {
 	// Start Redis controller
 	c.RunControllers(stopCh)
 
-	if c.EnableMutatingWebhook {
-		cancel1, _ := reg_util.SyncMutatingWebhookCABundle(c.ClientConfig, mutatingWebhookConfig)
-		defer cancel1()
-	}
-	if c.EnableValidatingWebhook {
-		cancel2, _ := reg_util.SyncValidatingWebhookCABundle(c.ClientConfig, validatingWebhookConfig)
-		defer cancel2()
-	}
-
 	<-stopCh
 	klog.Infoln("Stopping KubeDB controller")
 }
@@ -203,6 +193,7 @@ func (c *Controller) pushFailureEvent(db *api.Redis, reason string) {
 		reason,
 	)
 }
+
 func (c *Controller) pushSentinelFailureEvent(db *api.RedisSentinel, reason string) {
 	c.Recorder.Eventf(
 		db,

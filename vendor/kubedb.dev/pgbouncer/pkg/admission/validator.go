@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"sync"
 
-	"kubedb.dev/apimachinery/apis/kubedb"
 	api "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
 	cs "kubedb.dev/apimachinery/client/clientset/versioned"
 
 	cm_api "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1"
-	admission "k8s.io/api/admission/v1beta1"
+	admission "k8s.io/api/admission/v1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,7 +36,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	meta_util "kmodules.xyz/client-go/meta"
-	hookapi "kmodules.xyz/webhook-runtime/admission/v1beta1"
+	hookapi "kmodules.xyz/webhook-runtime/admission/v1"
+	"kmodules.xyz/webhook-runtime/builder"
 )
 
 type PgBouncerValidator struct {
@@ -50,12 +50,7 @@ type PgBouncerValidator struct {
 var _ hookapi.AdmissionHook = &PgBouncerValidator{}
 
 func (a *PgBouncerValidator) Resource() (plural schema.GroupVersionResource, singular string) {
-	return schema.GroupVersionResource{
-			Group:    kubedb.ValidatorGroupName,
-			Version:  "v1alpha1",
-			Resource: api.ResourcePluralPgBouncer,
-		},
-		api.ResourceSingularPgBouncer
+	return builder.ValidatorResource(api.Kind(api.ResourceKindPgBouncer))
 }
 
 func (a *PgBouncerValidator) Initialize(config *rest.Config, stopCh <-chan struct{}) error {
@@ -76,7 +71,6 @@ func (a *PgBouncerValidator) Initialize(config *rest.Config, stopCh <-chan struc
 
 func (pbValidator *PgBouncerValidator) Admit(req *admission.AdmissionRequest) *admission.AdmissionResponse {
 	status := &admission.AdmissionResponse{}
-
 	if (req.Operation != admission.Create && req.Operation != admission.Update && req.Operation != admission.Delete) ||
 		len(req.SubResource) != 0 ||
 		req.Kind.Group != api.SchemeGroupVersion.Group ||
@@ -101,6 +95,8 @@ func (pbValidator *PgBouncerValidator) Admit(req *admission.AdmissionRequest) *a
 			}
 			if err != nil && !kerr.IsNotFound(err) {
 				return hookapi.StatusInternalServerError(err)
+			} else if err == nil && obj.Spec.TerminationPolicy == api.PgBouncerTerminationPolicyDoNotTerminate {
+				return hookapi.StatusBadRequest(fmt.Errorf(`PgBouncer "%v/%v" can't be terminated. To delete, change spec.terminationPolicy`, req.Namespace, req.Name))
 			}
 		}
 	default:
@@ -144,13 +140,11 @@ func ValidatePgBouncer(client kubernetes.Interface, extClient cs.Interface, db *
 	}
 
 	if db.Spec.TLS != nil {
-		if db.Spec.TLS != nil {
-			if *db.Spec.TLS.IssuerRef.APIGroup != cm_api.SchemeGroupVersion.Group {
-				return fmt.Errorf(`spec.tls.client.issuerRef.apiGroup must be %s`, cm_api.SchemeGroupVersion.Group)
-			}
-			if (db.Spec.TLS.IssuerRef.Kind != cm_api.IssuerKind) && (db.Spec.TLS.IssuerRef.Kind != cm_api.ClusterIssuerKind) {
-				return fmt.Errorf(`spec.tls.client.issuerRef.issuerKind must be either %s or %s`, cm_api.IssuerKind, cm_api.ClusterIssuerKind)
-			}
+		if *db.Spec.TLS.IssuerRef.APIGroup != cm_api.SchemeGroupVersion.Group {
+			return fmt.Errorf(`spec.tls.client.issuerRef.apiGroup must be %s`, cm_api.SchemeGroupVersion.Group)
+		}
+		if (db.Spec.TLS.IssuerRef.Kind != cm_api.IssuerKind) && (db.Spec.TLS.IssuerRef.Kind != cm_api.ClusterIssuerKind) {
+			return fmt.Errorf(`spec.tls.client.issuerRef.issuerKind must be either %s or %s`, cm_api.IssuerKind, cm_api.ClusterIssuerKind)
 		}
 	}
 
